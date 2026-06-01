@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import VolunteerScanner from "./pages/VolunteerScanner";
 import ExternalVerify from "./pages/ExternalVerify";
+import LandingPage from "./pages/LandingPage";
 
 function App() {
   const [role, setRole] = useState(localStorage.getItem("role") || null);
@@ -55,7 +56,12 @@ function App() {
     <ThemeProvider>
       <ToastProvider>
         <Router>
-          <div className="app-bg">
+          <div className="app-bg relative">
+            {/* Global Animated Background */}
+            <div className="fixed inset-0 z-0 pointer-events-none">
+              <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-600/20 blur-[120px] animate-pulse-glow" />
+              <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-600/10 blur-[120px] animate-pulse-glow" style={{ animationDelay: '2s' }} />
+            </div>
             {isInitializing ? (
               <div
                 style={{
@@ -77,19 +83,12 @@ function App() {
                 />
               </div>
             ) : (
-              <Routes>
+              <div className="relative z-10">
+                <Routes>
                 <Route
                   path="/"
                   element={
-                    <Navigate
-                      to={
-                        role
-                          ? role === "ADMIN"
-                            ? "/admin"
-                            : "/volunteer"
-                          : "/login"
-                      }
-                    />
+                    !role ? <LandingPage /> : <Navigate to={role === "ADMIN" ? "/admin" : "/volunteer"} />
                   }
                 />
                 <Route
@@ -120,6 +119,7 @@ function App() {
                 />
                 <Route path="/verify/:token" element={<ExternalVerify />} />
               </Routes>
+              </div>
             )}
           </div>
         </Router>

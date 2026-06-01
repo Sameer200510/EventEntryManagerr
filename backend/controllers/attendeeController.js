@@ -6,8 +6,7 @@ const { sendQrEmail } = require("../utils/email");
 const prisma = require("../prismaClient");
 
 exports.scanAttendee = async (req, res) => {
-  const ip =
-    req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown";
+  const ip = req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown";
   const userAgent = req.headers["user-agent"] || "unknown";
 
   const logScan = async (tx, data) => {
@@ -16,7 +15,8 @@ exports.scanAttendee = async (req, res) => {
         data: {
           attendeeId: data.attendeeId || null,
           scannedById: req.user?.id || null,
-          scanType: data.type === "food" ? "FOOD" : "ENTRY",
+          checkpointId: data.checkpointId || null,
+          scanType: data.type === "food" ? "FOOD" : (data.type === "entry" ? "ENTRY" : null),
           result: data.success ? "SUCCESS" : "DENIED",
           reason: data.resultCode,
           ip: data.ip,
@@ -29,249 +29,89 @@ exports.scanAttendee = async (req, res) => {
   };
 
   try {
-    const { token, type = "entry" } = req.body;
+    const { token, type, checkpointId } = req.body;
 
-    if (!token) {
-      return res.status(400).json({ error: "Token is required" });
-    }
-
-    if (!["entry", "food"].includes(type)) {
-      return res.status(400).json({ error: "Invalid scan type." });
-    }
-
-    if (req.user.role === "ENTRY_VOLUNTEER" && type !== "entry") {
-      return res
-        .status(403)
-        .json({ error: "Entry volunteers can only perform entry scans." });
-    }
-
-    if (req.user.role === "FOOD_VOLUNTEER" && type !== "food") {
-      return res
-        .status(403)
-        .json({ error: "Food volunteers can only perform food scans." });
-    }
+    if (!token) return res.status(400).json({ error: "Token is required" });
+    if (!checkpointId && !["entry", "food"].includes(type)) return res.status(400).json({ error: "Invalid scan configuration." });
 
     const result = await prisma.$transaction(async (tx) => {
       const attendee = await tx.attendee.findUnique({
         where: { token },
+        include: { event: { include: { checkpoints: { orderBy: { order: "asc" } } } } }
       });
 
       if (!attendee) {
-        await logScan(tx, {
-          type,
-          success: false,
-          resultCode: "INVALID_TOKEN",
-          ip,
-          userAgent,
+        await logScan(tx, { type, checkpointId: checkpointId ? parseInt(checkpointId) : null, success: false, resultCode: "INVALID_TOKEN", ip, userAgent });
+        return { status: 404, payload: { error: "Invalid or unknown QR token." } };
+      }
+      
+      const event = attendee.event;
+      if (!event) return { status: 400, payload: { error: "Attendee is not associated with an event." } };
+
+      if (checkpointId) {
+        const cp = event.checkpoints.find(c => c.id === parseInt(checkpointId));
+        if (!cp || !cp.isActive) {
+          await logScan(tx, { type, checkpointId: parseInt(checkpointId), attendeeId: attendee.id, success: false, resultCode: "INVALID_CHECKPOINT", ip, userAgent });
+          return { status: 400, payload: { error: "Invalid or inactive checkpoint." } };
+        }
+
+        const existingStatus = await tx.checkpointStatus.findUnique({
+          where: { attendeeId_checkpointId: { attendeeId: attendee.id, checkpointId: cp.id } }
         });
 
-        return {
-          status: 404,
-          payload: { error: "Invalid or unknown QR token." },
-        };
+        if (existingStatus && existingStatus.status) {
+          await logScan(tx, { type, checkpointId: cp.id, attendeeId: attendee.id, success: false, resultCode: "ALREADY_SCANNED", ip, userAgent });
+          return { status: 400, payload: { error: `${attendee.name} has already been scanned at ${cp.name}.` } };
+        }
+
+        if (event.isSequential) {
+          const currentIndex = event.checkpoints.findIndex(c => c.id === cp.id);
+          if (currentIndex > 0) {
+            const previousCp = event.checkpoints[currentIndex - 1];
+            const prevStatus = await tx.checkpointStatus.findUnique({
+              where: { attendeeId_checkpointId: { attendeeId: attendee.id, checkpointId: previousCp.id } }
+            });
+            if (!prevStatus || !prevStatus.status) {
+              await logScan(tx, { type, checkpointId: cp.id, attendeeId: attendee.id, success: false, resultCode: "OUT_OF_SEQUENCE", ip, userAgent });
+              return { status: 400, payload: { error: `Out of sequence: Please scan at ${previousCp.name} first.` } };
+            }
+          }
+        }
+
+        await tx.checkpointStatus.upsert({
+          where: { attendeeId_checkpointId: { attendeeId: attendee.id, checkpointId: cp.id } },
+          update: { status: true, scannedAt: new Date(), scannedById: req.user?.id },
+          create: { attendeeId: attendee.id, checkpointId: cp.id, status: true, scannedAt: new Date(), scannedById: req.user?.id }
+        });
+
+        await logScan(tx, { type, checkpointId: cp.id, attendeeId: attendee.id, success: true, resultCode: "ALLOWED", ip, userAgent });
+        return { status: 200, payload: { message: `Successfully scanned at ${cp.name}!`, attendee: { name: attendee.name, roll: attendee.roll } } };
       }
 
+      // Legacy fallback
       if (type === "entry") {
         if (attendee.entryStatus) {
-          if (attendee.entryOtpUsed) {
-            await logScan(tx, {
-              type,
-              attendeeId: attendee.id,
-              success: true,
-              resultCode: "ALREADY_USED_OTP",
-              ip,
-              userAgent,
-            });
-
-            return {
-              status: 200,
-              payload: {
-                alreadyVerified: true,
-                entry_method: "OTP",
-                message: `${attendee.name} was already verified via OTP.`,
-                attendee: {
-                  name: attendee.name,
-                  roll: attendee.roll,
-                  entryScannedAt: attendee.entryScannedAt,
-                },
-              },
-            };
-          }
-
-          await logScan(tx, {
-            type,
-            attendeeId: attendee.id,
-            success: false,
-            resultCode: "ALREADY_USED_ENTRY",
-            ip,
-            userAgent,
-          });
-
-          return {
-            status: 400,
-            payload: {
-              error: `${attendee.name} has already been scanned in for entry.`,
-              attendee: {
-                name: attendee.name,
-                roll: attendee.roll,
-                entryScannedAt: attendee.entryScannedAt,
-              },
-            },
-          };
+          await logScan(tx, { type, attendeeId: attendee.id, success: false, resultCode: "ALREADY_USED_ENTRY", ip, userAgent });
+          return { status: 400, payload: { error: `${attendee.name} has already been scanned in for entry.` } };
         }
+        await tx.attendee.update({ where: { id: attendee.id }, data: { entryStatus: true, entryScannedAt: new Date() } });
+        await logScan(tx, { type, attendeeId: attendee.id, success: true, resultCode: "ALLOWED_ENTRY", ip, userAgent });
+        return { status: 200, payload: { message: "Entry Allowed!", attendee: { name: attendee.name, roll: attendee.roll } } };
+      }
 
-        const updated = await tx.attendee.updateMany({
-          where: {
-            id: attendee.id,
-            entryStatus: false,
-          },
-          data: {
-            entryStatus: true,
-            entryScannedAt: new Date(),
-          },
-        });
-
-        if (updated.count === 0) {
-          await logScan(tx, {
-            type,
-            attendeeId: attendee.id,
-            success: false,
-            resultCode: "ENTRY_RACE_CONFLICT",
-            ip,
-            userAgent,
-          });
-
-          return {
-            status: 409,
-            payload: { error: "Entry was just scanned by another device." },
-          };
+      if (type === "food") {
+        if (!attendee.entryStatus) {
+          await logScan(tx, { type, attendeeId: attendee.id, success: false, resultCode: "ENTRY_REQUIRED_FOR_FOOD", ip, userAgent });
+          return { status: 400, payload: { error: `Entry required before food distribution for ${attendee.name}.` } };
         }
-
-        const finalAttendee = await tx.attendee.findUnique({
-          where: { id: attendee.id },
-        });
-
-        await logScan(tx, {
-          type,
-          attendeeId: finalAttendee.id,
-          success: true,
-          resultCode: "ALLOWED_ENTRY",
-          ip,
-          userAgent,
-        });
-
-        return {
-          status: 200,
-          payload: {
-            message: "Entry Allowed!",
-            attendee: {
-              name: finalAttendee.name,
-              roll: finalAttendee.roll,
-              entryScannedAt: finalAttendee.entryScannedAt,
-            },
-          },
-        };
+        if (attendee.foodStatus) {
+          await logScan(tx, { type, attendeeId: attendee.id, success: false, resultCode: "ALREADY_USED_FOOD", ip, userAgent });
+          return { status: 400, payload: { error: `Food already collected by ${attendee.name}.` } };
+        }
+        await tx.attendee.update({ where: { id: attendee.id }, data: { foodStatus: true, foodScannedAt: new Date() } });
+        await logScan(tx, { type, attendeeId: attendee.id, success: true, resultCode: "ALLOWED_FOOD", ip, userAgent });
+        return { status: 200, payload: { message: "Food Distribution Allowed!", attendee: { name: attendee.name, roll: attendee.roll } } };
       }
-
-      if (!attendee.entryStatus) {
-        await logScan(tx, {
-          type,
-          attendeeId: attendee.id,
-          success: false,
-          resultCode: "ENTRY_REQUIRED_FOR_FOOD",
-          ip,
-          userAgent,
-        });
-
-        return {
-          status: 400,
-          payload: {
-            error: `Entry required before food distribution for ${attendee.name}.`,
-            attendee: {
-              name: attendee.name,
-              roll: attendee.roll,
-            },
-          },
-        };
-      }
-
-      if (attendee.foodStatus) {
-        await logScan(tx, {
-          type,
-          attendeeId: attendee.id,
-          success: false,
-          resultCode: "ALREADY_USED_FOOD",
-          ip,
-          userAgent,
-        });
-
-        return {
-          status: 400,
-          payload: {
-            error: `Food already collected by ${attendee.name}.`,
-            attendee: {
-              name: attendee.name,
-              roll: attendee.roll,
-              foodScannedAt: attendee.foodScannedAt,
-            },
-          },
-        };
-      }
-
-      const updated = await tx.attendee.updateMany({
-        where: {
-          id: attendee.id,
-          foodStatus: false,
-          entryStatus: true,
-        },
-        data: {
-          foodStatus: true,
-          foodScannedAt: new Date(),
-        },
-      });
-
-      if (updated.count === 0) {
-        await logScan(tx, {
-          type,
-          attendeeId: attendee.id,
-          success: false,
-          resultCode: "FOOD_RACE_CONFLICT",
-          ip,
-          userAgent,
-        });
-
-        return {
-          status: 409,
-          payload: {
-            error: "Food collection was just processed by another device.",
-          },
-        };
-      }
-
-      const finalAttendee = await tx.attendee.findUnique({
-        where: { id: attendee.id },
-      });
-
-      await logScan(tx, {
-        type,
-        attendeeId: finalAttendee.id,
-        success: true,
-        resultCode: "ALLOWED_FOOD",
-        ip,
-        userAgent,
-      });
-
-      return {
-        status: 200,
-        payload: {
-          message: "Food Distribution Allowed!",
-          attendee: {
-            name: finalAttendee.name,
-            roll: finalAttendee.roll,
-            foodScannedAt: finalAttendee.foodScannedAt,
-          },
-        },
-      };
     });
 
     return res.status(result.status).json(result.payload);
@@ -847,5 +687,61 @@ exports.clearAttendees = async (req, res) => {
   } catch (err) {
     console.error("Error clearing attendees:", err);
     res.status(500).json({ error: "Failed to clear attendees" });
+  }
+};
+
+
+exports.getCampaignFailures = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const failures = await prisma.emailJob.findMany({
+      where: {
+        campaignId: Number(id),
+        status: { in: ["FAILED", "PERM_FAILED"] }
+      },
+      include: {
+        attendee: { select: { email: true, name: true, roll: true } }
+      },
+      orderBy: { updatedAt: "desc" }
+    });
+    res.json(failures);
+  } catch (error) {
+    console.error("Error fetching campaign failures:", error);
+    res.status(500).json({ error: "Failed to fetch campaign failures." });
+  }
+};
+
+exports.retryFailedEmails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const updatedJobs = await prisma.emailJob.updateMany({
+      where: {
+        campaignId: Number(id),
+        status: { in: ["FAILED", "PERM_FAILED"] }
+      },
+      data: {
+        status: "PENDING",
+        errorMessage: null,
+        nextRetryAt: new Date()
+      }
+    });
+
+    // We also need to update the campaign counts to reflect the pending jobs
+    if (updatedJobs.count > 0) {
+      await prisma.emailCampaign.update({
+        where: { id: Number(id) },
+        data: {
+          failedCount: { decrement: updatedJobs.count },
+          pendingCount: { increment: updatedJobs.count },
+          status: "RUNNING" // restart campaign if it was completed/paused
+        }
+      });
+    }
+
+    res.json({ message: `Successfully queued ${updatedJobs.count} failed emails for retry.` });
+  } catch (error) {
+    console.error("Error retrying failed emails:", error);
+    res.status(500).json({ error: "Failed to retry failed emails." });
   }
 };

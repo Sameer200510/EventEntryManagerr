@@ -5,8 +5,23 @@ const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Configure multer for memory storage
-const upload = multer({ storage: multer.memoryStorage() });
+// Configure multer for memory storage with security validation
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      'text/csv', 
+      'application/vnd.ms-excel', 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Invalid file type. Only CSV and Excel files are allowed."));
+    }
+  },
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Routes - Protected by role
 router.post('/parse-excel', protect, authorize('ADMIN'), upload.single('file'), attendeeController.parseExcel);

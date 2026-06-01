@@ -1,8 +1,10 @@
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  "oo_sajan_legaya_tu_mera_maan_tumse_koi_nahi_payra_loo_khe_diya_mera_dil_ne_ooo_yara";
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+  throw new Error("FATAL ERROR: JWT_SECRET is not defined in production environment.");
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || "development_secret_only";
 
 exports.protect = (req, res, next) => {
   let token;

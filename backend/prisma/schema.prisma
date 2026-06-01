@@ -45,6 +45,7 @@ model User {
   scanLogs       ScanLog[]
   auditLogs      AuditLog[]
   uploadDatasets UploadDataset[]
+  checkpointStatuses CheckpointStatus[]
 }
 
 model Attendee {
@@ -74,6 +75,7 @@ model Attendee {
   emailJobs      EmailJob[]
   eventId        Int?
   event          Event?         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  checkpointStatuses CheckpointStatus[]
 
   @@unique([datasetId, roll])
 }
@@ -99,7 +101,8 @@ model ScanLog {
   id           Int       @id @default(autoincrement())
   attendeeId   Int?
   scannedById  Int?
-  scanType     ScanType
+  scanType     ScanType?
+  checkpointId Int?
   result       ScanResult
   reason       String
   ip           String?
@@ -110,6 +113,7 @@ model ScanLog {
   attendee     Attendee? @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
   scannedBy    User?     @relation(fields: [scannedById], references: [id])
   event        Event?    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  checkpoint   Checkpoint? @relation(fields: [checkpointId], references: [id], onDelete: SetNull)
 }
 
 model OtpLog {
@@ -219,6 +223,7 @@ model Event {
   entryTiming   String?  
   exitTiming    String?  
   isActive      Boolean  @default(false)
+  isSequential  Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -227,6 +232,7 @@ model Event {
   scanLogs      ScanLog[]
   attendees     Attendee[]
   templates     EmailTemplate[]
+  checkpoints   Checkpoint[]
 }
 
 model EmailTemplate {
@@ -240,4 +246,35 @@ model EmailTemplate {
 
   event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
   campaigns   EmailCampaign[]
+}
+
+model Checkpoint {
+  id        Int      @id @default(autoincrement())
+  eventId   Int
+  name      String
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  statuses  CheckpointStatus[]
+  scanLogs  ScanLog[]
+}
+
+model CheckpointStatus {
+  id           Int      @id @default(autoincrement())
+  attendeeId   Int
+  checkpointId Int
+  status       Boolean  @default(false)
+  scannedAt    DateTime?
+  scannedById  Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  attendee     Attendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+  checkpoint   Checkpoint @relation(fields: [checkpointId], references: [id], onDelete: Cascade)
+  scannedBy    User?    @relation(fields: [scannedById], references: [id])
+  
+  @@unique([attendeeId, checkpointId])
 }

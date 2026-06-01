@@ -1,9 +1,6 @@
 import { ShieldAlert } from 'lucide-react';
-import { useTheme } from '../context/ThemeContext';
 
 export default function ExternalVerify() {
-  const { dark } = useTheme();
-
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',

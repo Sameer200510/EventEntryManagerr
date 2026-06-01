@@ -26,90 +26,49 @@ import {
   Trash2,
 } from "lucide-react";
 import api from "../utils/api";
-import { useTheme } from "../context/ThemeContext";
 import { useToast } from "../context/ToastContext";
 import logoImg from "../assets/logo.png";
 import EventManagement from "../components/EventManagement";
 import CampaignManagement from "../components/CampaignManagement";
-function StatCard({ label, value, total, color, icon, statColor }) {
+import DataCleanup from "../components/DataCleanup";
+import DeleteModal from "../components/DeleteModal";
+import { GlobalFooter } from "../components/ui/GlobalFooter";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import AttendeeTable from "../components/AttendeeTable";
+import DashboardAnalytics from "../components/DashboardAnalytics";
+
+function StatCard({ label, value, total, color, icon, statColor, trend = "+12%", trendUp = true }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0;
   return (
-    <div className="stat-card" style={{ "--stat-color": statColor || color }}>
-      {" "}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "0.5rem",
-        }}
-      >
-        {" "}
-        <p
-          style={{
-            fontSize: "0.7rem",
-            fontWeight: 700,
-            color: "var(--text-muted)",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            margin: 0,
-          }}
-        >
-          {" "}
-          {label}{" "}
-        </p>{" "}
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: `${statColor || color}18`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: statColor || color,
-          }}
-        >
-          {" "}
-          {icon}{" "}
-        </div>{" "}
-      </div>{" "}
-      <p
-        className="animate-count-up"
-        style={{
-          fontSize: "2rem",
-          fontWeight: 900,
-          color: statColor || color,
-          margin: "0 0 0.375rem",
-          lineHeight: 1,
-        }}
-      >
-        {" "}
-        {value}{" "}
-      </p>{" "}
-      {total > 0 && (
-        <>
-          {" "}
-          <div className="progress-bar">
-            {" "}
-            <div
-              className="progress-bar-fill"
-              style={{ width: `${pct}%` }}
-            />{" "}
-          </div>{" "}
-          <p
-            style={{
-              fontSize: "0.7rem",
-              color: "var(--text-muted)",
-              marginTop: "0.375rem",
-              fontWeight: 600,
-            }}
-          >
-            {" "}
-            {pct}% of {total}{" "}
-          </p>{" "}
-        </>
-      )}{" "}
+    <div className="card-glass p-5 relative overflow-hidden group hover:border-indigo-500/50 hover:shadow-[0_0_30px_rgba(99,102,241,0.15)] transition-all duration-300">
+      <div className="flex items-start justify-between mb-4 relative z-10">
+        <div>
+          <p className="text-[0.65rem] font-bold text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-3xl font-black text-white m-0 tracking-tight" style={{ color: statColor || color }}>{value}</h3>
+            {total > 0 && <span className="text-sm font-medium text-slate-500">/ {total}</span>}
+          </div>
+        </div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-lg" style={{ background: `${statColor || color}20`, color: statColor || color, boxShadow: `0 4px 20px ${statColor || color}20` }}>
+          {icon}
+        </div>
+      </div>
+      
+      <div className="flex items-center justify-between relative z-10">
+        <div className={`flex items-center gap-1.5 text-xs font-bold ${trendUp ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`w-1.5 h-1.5 rounded-full ${trendUp ? 'bg-emerald-400' : 'bg-red-400'} animate-pulse`} />
+          {trend} vs last event
+        </div>
+        
+        {total > 0 && (
+          <div className="w-1/3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${pct}%`, background: statColor || color }} />
+          </div>
+        )}
+      </div>
+      
+      {/* Decorative background glow */}
+      <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full blur-2xl opacity-20 pointer-events-none transition-opacity group-hover:opacity-40" style={{ background: statColor || color }} />
     </div>
   );
 }
@@ -176,12 +135,17 @@ export default function AdminDashboard({ onLogout }) {
   const [campaignActionLoading, setCampaignActionLoading] = useState(false);
   const [customMessage, setCustomMessage] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterEntry, setFilterEntry] = useState("all");
-  const [filterFood, setFilterFood] = useState("all");
+  const [sortOption, setSortOption] = useState("upload");
+  const [checkpointFilters, setCheckpointFilters] = useState({});
+  const [emailFilter, setEmailFilter] = useState("all");
   const [showEmailConfig, setShowEmailConfig] = useState(false);
   const [events, setEvents] = useState([]);
   const [activeEventId, setActiveEventId] = useState("");
-  const { dark, setDark } = useTheme();
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, type: null, id: null, isProcessing: false });
+  
+  const activeEvent = events.find(e => e.id === activeEventId);
+  const eventCheckpoints = activeEvent?.checkpoints || [];
+  
   const { toast } = useToast();
   
   const fetchGlobalEvents = async () => {
@@ -356,33 +320,31 @@ export default function AdminDashboard({ onLogout }) {
     }
   };
 
-  const handleClearAttendees = async () => {
-    if (!activeEventId) {
-      toast({ type: "error", message: "Select an event first!" });
-      return;
-    }
-    const confirmation = window.prompt('Are you sure you want to delete all attendees? This cannot be undone. Type "DELETE" to confirm.');
-    if (confirmation === 'DELETE') {
-      try {
-        await api.delete(`/attendees/clear?eventId=${activeEventId}`);
-        toast({ type: "success", message: "All attendees cleared successfully!" });
-        await fetchAttendees();
-      } catch (err) {
-        toast({ type: "error", message: err.response?.data?.error || "Failed to clear attendees" });
-      }
-    } else if (confirmation !== null) {
-      toast({ type: "error", message: "Clear operation cancelled (typed incorrectly)." });
-    }
+  const handleClearAttendees = () => {
+    if (!activeEventId) return toast({ type: "error", message: "Select an event first!" });
+    setDeleteModal({ isOpen: true, type: "clearAttendees", id: activeEventId, isProcessing: false });
   };
 
-  const handleDeleteDataset = async (id) => {
-    if (!window.confirm("Permanently delete this dataset? This cannot be undone.")) return;
+  const handleDeleteDataset = (id) => {
+    setDeleteModal({ isOpen: true, type: "deleteDataset", id, isProcessing: false });
+  };
+
+  const processModalConfirm = async () => {
+    setDeleteModal(prev => ({ ...prev, isProcessing: true }));
     try {
-      await api.delete(`/attendees/datasets/${id}`);
-      toast({ type: "success", message: "Dataset deleted!" });
-      await fetchAttendees();
+      if (deleteModal.type === "clearAttendees") {
+        await api.delete(`/attendees/clear?eventId=${deleteModal.id}`);
+        toast({ type: "success", message: "All attendees cleared successfully!" });
+        await fetchAttendees();
+      } else if (deleteModal.type === "deleteDataset") {
+        await api.delete(`/attendees/datasets/${deleteModal.id}`);
+        toast({ type: "success", message: "Dataset deleted!" });
+        await fetchAttendees();
+      }
     } catch (err) {
-      toast({ type: "error", message: "Failed to delete dataset." });
+      toast({ type: "error", message: err.response?.data?.error || "Operation failed" });
+    } finally {
+      setDeleteModal({ isOpen: false, type: null, id: null, isProcessing: false });
     }
   };
 
@@ -504,21 +466,36 @@ export default function AdminDashboard({ onLogout }) {
     setStep(1);
     setError(null);
   };
-  const filtered = attendees.filter((a) => {
+  let filtered = attendees.filter((a) => {
     const s = searchTerm.toLowerCase();
-    return (
-      (a.name.toLowerCase().includes(s) || a.roll.toLowerCase().includes(s)) &&
-      (filterEntry === "all" ||
-        (filterEntry === "done" ? a.entryStatus : !a.entryStatus)) &&
-      (filterFood === "all" ||
-        (filterFood === "done" ? a.foodStatus : !a.foodStatus))
-    );
+    if (!(a.name.toLowerCase().includes(s) || a.roll.toLowerCase().includes(s))) return false;
+    
+    for (const cp of eventCheckpoints) {
+      const filterValue = checkpointFilters[cp.id] || "all";
+      if (filterValue !== "all") {
+        const statusObj = a.checkpointStatuses?.find(cs => cs.checkpointId === cp.id);
+        const isDone = !!statusObj?.status;
+        if (filterValue === "done" && !isDone) return false;
+        if (filterValue === "pending" && isDone) return false;
+      }
+    }
+    
+    if (emailFilter === "sent" && !a.emailSent) return false;
+    if (emailFilter === "pending" && a.emailSent) return false;
+
+    return true;
   });
+  filtered = filtered.sort((a, b) => {
+    if (sortOption === "name") {
+      return a.name.localeCompare(b.name);
+    } else if (sortOption === "roll") {
+      return a.roll.localeCompare(b.roll, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    return 0; // upload order
+  });
+
   const stats = {
     total: attendees.length,
-    entry: attendees.filter((a) => a.entryStatus).length,
-    food: attendees.filter((a) => a.foodStatus).length,
-    pending: attendees.filter((a) => !a.entryStatus).length,
   };
 
   return (
@@ -527,6 +504,7 @@ export default function AdminDashboard({ onLogout }) {
       <header
         style={{
           background: "var(--surface)",
+          backdropFilter: "blur(24px)",
           borderBottom: "1px solid var(--border)",
           padding: "0 1.25rem",
           height: 64,
@@ -575,9 +553,6 @@ export default function AdminDashboard({ onLogout }) {
         </div>
 
         <div style={{ display: "flex", gap: "0.625rem", alignItems: "center" }}>
-          <button onClick={() => setDark(!dark)} className="btn-icon" style={{ borderRadius: 10 }}>
-            {dark ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
           <button
             onClick={() => setActiveTab("dashboard")}
             className="btn btn-sm btn-secondary"
@@ -850,31 +825,25 @@ export default function AdminDashboard({ onLogout }) {
             icon={<Users size={16} />}
             statColor="var(--brand)"
           />
-          <StatCard
-            label="Admitted"
-            value={stats.entry}
-            total={stats.total}
-            color="var(--green)"
-            icon={<ScanLine size={16} />}
-            statColor="var(--green)"
-          />
-          <StatCard
-            label="Food Served"
-            value={stats.food}
-            total={stats.total}
-            color="var(--amber)"
-            icon={<Utensils size={16} />}
-            statColor="var(--amber)"
-          />
-          <StatCard
-            label="Pending"
-            value={stats.pending}
-            total={stats.total}
-            color="var(--red)"
-            icon={<AlertCircle size={16} />}
-            statColor="var(--red)"
-          />
+          {eventCheckpoints.map((cp, idx) => {
+            const passed = attendees.filter(a => a.checkpointStatuses?.find(cs => cs.checkpointId === cp.id)?.status).length;
+            const colors = ["var(--green)", "var(--amber)", "var(--blue)", "var(--purple)", "var(--pink)"];
+            return (
+              <StatCard
+                key={cp.id}
+                label={cp.name}
+                value={passed}
+                total={stats.total}
+                color={colors[idx % colors.length]}
+                icon={<ScanLine size={16} />}
+                statColor={colors[idx % colors.length]}
+              />
+            );
+          })}
         </div>
+
+        {/* Analytics Dashboard */}
+        <DashboardAnalytics attendees={attendees} eventCheckpoints={eventCheckpoints} />
 
         {/* Campaign Monitor */}
         {activeCampaign && (
@@ -1364,282 +1333,38 @@ export default function AdminDashboard({ onLogout }) {
           </div>
         )}
 
-        {/* Attendee List */}
-        <div id="alist" className="card" style={{ overflow: "hidden" }}>
-          {/* Toolbar */}
-          <div
-            style={{
-              padding: "1rem 1.25rem",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "0.75rem",
-              justifyContent: "space-between",
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  fontWeight: 800,
-                  fontSize: "0.9375rem",
-                  color: "var(--text-primary)",
-                  margin: 0,
-                }}
-              >
-                Attendee List
-              </h2>
-              <p
-                style={{
-                  color: "var(--text-muted)",
-                  fontSize: "0.75rem",
-                  margin: "0.125rem 0 0",
-                  fontWeight: 500,
-                }}
-              >
-                {filtered.length} of {stats.total} shown
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button
-                onClick={handleClearAttendees}
-                className="btn btn-sm btn-secondary"
-                style={{ background: "var(--red-light)", color: "var(--red)", borderColor: "var(--red)" }}
-                title="Delete all attendees for this event"
-              >
-                <Trash2 size={13} /> Clear All
-              </button>
-              <button
-                onClick={fetchAttendees}
-                className="btn btn-sm btn-secondary"
-              >
-                <RefreshCw size={13} /> Refresh
-              </button>
-            </div>
-          </div>
-
-          {/* Filters */}
-          <div
-            style={{
-              padding: "0.875rem 1.25rem",
-              borderBottom: "1px solid var(--border)",
-              display: "flex",
-              gap: "0.625rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <div style={{ flex: "2 1 180px", position: "relative" }}>
-              <Search
-                size={15}
-                style={{
-                  position: "absolute",
-                  left: "0.75rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--text-muted)",
-                }}
-              />
-              <input
-                className="input"
-                style={{ paddingLeft: "2.25rem", fontSize: "0.875rem" }}
-                type="text"
-                placeholder="Search name or roll…"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <select
-              className="input select"
-              style={{ flex: "1 1 130px", fontSize: "0.875rem" }}
-              value={filterEntry}
-              onChange={(e) => setFilterEntry(e.target.value)}
-            >
-              <option value="all">Entry: All</option>
-              <option value="done">Entry: Done ✓</option>
-              <option value="pending">Entry: Pending</option>
-            </select>
-            <select
-              className="input select"
-              style={{ flex: "1 1 130px", fontSize: "0.875rem" }}
-              value={filterFood}
-              onChange={(e) => setFilterFood(e.target.value)}
-            >
-              <option value="all">Food: All</option>
-              <option value="done">Food: Served ✓</option>
-              <option value="pending">Food: Pending</option>
-            </select>
-            {(searchTerm || filterEntry !== "all" || filterFood !== "all") && (
-              <button
-                className="btn-icon"
-                onClick={() => {
-                  setSearchTerm("");
-                  setFilterEntry("all");
-                  setFilterFood("all");
-                }}
-              >
-                <X size={15} />
-              </button>
-            )}
-          </div>
-
-          {/* Table */}
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 680,
-              }}
-            >
-              <thead>
-                <tr style={{ background: "var(--surface-2)" }}>
-                  {["Attendee", "Roll No", "Entry", "Food", "Email"].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        style={{
-                          padding: "0.75rem 1rem",
-                          textAlign: ["Entry", "Food", "Email"].includes(h)
-                            ? "center"
-                            : "left",
-                          fontSize: "0.7rem",
-                          fontWeight: 700,
-                          color: "var(--text-muted)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.06em",
-                          borderBottom: "1px solid var(--border)",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {h}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      style={{
-                        padding: "3rem",
-                        textAlign: "center",
-                        color: "var(--text-muted)",
-                        fontWeight: 500,
-                      }}
-                    >
-                      No results found.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((a, i) => (
-                    <tr
-                      key={a.id}
-                      style={{
-                        borderBottom: "1px solid var(--border-subtle)",
-                        background:
-                          i % 2 === 0 ? "transparent" : "var(--surface-2)",
-                        transition: "background 0.15s",
-                        cursor: "default",
-                      }}
-                      onMouseEnter={(e) =>
-                      (e.currentTarget.style.background =
-                        "var(--brand-light)")
-                      }
-                      onMouseLeave={(e) =>
-                      (e.currentTarget.style.background =
-                        i % 2 === 0 ? "transparent" : "var(--surface-2)")
-                      }
-                    >
-                      <td style={{ padding: "0.875rem 1rem" }}>
-                        <p
-                          style={{
-                            fontWeight: 700,
-                            color: "var(--text-primary)",
-                            margin: 0,
-                            fontSize: "0.9rem",
-                          }}
-                        >
-                          {a.name}
-                        </p>
-                        <p
-                          style={{
-                            color: "var(--text-muted)",
-                            fontSize: "0.7rem",
-                            margin: "0.125rem 0 0",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {a.emailSent ? "✉️ Sent" : "⏳ Pending"}
-                        </p>
-                      </td>
-                      <td
-                        style={{
-                          padding: "0.875rem 1rem",
-                          color: "var(--text-secondary)",
-                          fontWeight: 600,
-                          fontSize: "0.875rem",
-                        }}
-                      >
-                        {a.roll}
-                      </td>
-                      <td
-                        style={{
-                          padding: "0.875rem 1rem",
-                          textAlign: "center",
-                        }}
-                      >
-                        <StatusBadge
-                          done={a.entryStatus}
-                          doneLabel="Admitted"
-                          time={a.entryScannedAt}
-                        />
-                      </td>
-                      <td
-                        style={{
-                          padding: "0.875rem 1rem",
-                          textAlign: "center",
-                        }}
-                      >
-                        <StatusBadge
-                          done={a.foodStatus}
-                          doneLabel="Served"
-                          time={a.foodScannedAt}
-                        />
-                      </td>
-                      <td
-                        style={{
-                          padding: "0.875rem 1rem",
-                          textAlign: "center",
-                        }}
-                      >
-                        <button
-                          onClick={() => handleSendEmail(a.id)}
-                          disabled={!a.email || emailLoading === a.id}
-                          className={`btn btn-xs ${a.emailSent ? "btn-secondary" : "btn-primary"}`}
-                        >
-                          {emailLoading === a.id ? (
-                            <Loader2 size={12} className="animate-spin" />
-                          ) : (
-                            <Mail size={12} />
-                          )}
-                          {a.emailSent ? "Resend" : "Send"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        {/* Attendee Table Component */}
+        <div id="alist" className="mb-4">
+          <AttendeeTable 
+            filtered={filtered}
+            stats={stats}
+            eventCheckpoints={eventCheckpoints}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            sortOption={sortOption}
+            setSortOption={setSortOption}
+            checkpointFilters={checkpointFilters}
+            setCheckpointFilters={setCheckpointFilters}
+            emailFilter={emailFilter}
+            setEmailFilter={setEmailFilter}
+            handleClearAttendees={handleClearAttendees}
+            fetchAttendees={fetchAttendees}
+            handleSendEmail={handleSendEmail}
+            emailLoading={emailLoading}
+          />
         </div>
         </>
         )}
+        <GlobalFooter />
       </main>
-      <div className="watermark">
-        Designed by SAMEER LOHANI &amp; VARUN DOBHAL
-      </div>
+      <DeleteModal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ isOpen: false, type: null, id: null, isProcessing: false })}
+        onConfirm={processModalConfirm}
+        title={deleteModal.type === "clearAttendees" ? "Clear All Attendees" : "Delete Dataset"}
+        message={deleteModal.type === "clearAttendees" ? "Are you sure you want to permanently delete all attendees for this event? This action cannot be undone." : "Are you sure you want to permanently delete this dataset? This action cannot be undone."}
+        isDeleting={deleteModal.isProcessing}
+      />
     </div>
   );
 }

@@ -4,16 +4,15 @@ import {
   ScanLine,
   Eye,
   EyeOff,
-  Moon,
-  Sun,
   ShieldCheck,
-  Utensils,
   User,
   ArrowRight,
+  CheckCircle2,
+  Lock,
 } from "lucide-react";
 import api from "../utils/api";
-import { useTheme } from "../context/ThemeContext";
 import logoImg from "../assets/logo.png";
+import { GlobalFooter } from "../components/ui/GlobalFooter";
 
 const ALLOWED_ROLES = ["ADMIN", "ENTRY_VOLUNTEER", "FOOD_VOLUNTEER"];
 
@@ -35,29 +34,16 @@ const persistSession = ({ token, role }) => {
   localStorage.setItem("role", role);
 };
 
-const FloatingOrb = ({ style }) => (
-  <div
-    aria-hidden
-    style={{
-      position: "absolute",
-      borderRadius: "50%",
-      filter: "blur(90px)",
-      pointerEvents: "none",
-      ...style,
-    }}
-  />
-);
-
 export default function Login({ setRole }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState(null);
 
   const navigate = useNavigate();
-  const { dark, setDark } = useTheme();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -72,8 +58,6 @@ export default function Login({ setRole }) {
     }
 
     setLoading(true);
-
-
 
     try {
       const { data } = await api.post("/auth/login", {
@@ -110,271 +94,185 @@ export default function Login({ setRole }) {
     }
   };
 
-
-  const pageBg = dark
-    ? "#050816"
-    : "radial-gradient(circle at top left, #e0e7ff 0%, #f8fafc 55%)";
-
   return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1.5rem",
-        position: "relative",
-        overflow: "hidden",
-        background: pageBg,
-      }}
-    >
-      <FloatingOrb
-        style={{
-          top: "-10%",
-          right: "-8%",
-          width: 320,
-          height: 320,
-          background: dark ? "rgba(99,102,241,0.12)" : "rgba(99,102,241,0.16)",
-        }}
-      />
-      <FloatingOrb
-        style={{
-          bottom: "-12%",
-          left: "-10%",
-          width: 280,
-          height: 280,
-          background: dark ? "rgba(16,185,129,0.08)" : "rgba(16,185,129,0.12)",
-        }}
-      />
+    <div className="min-h-screen bg-transparent flex flex-col relative overflow-hidden font-sans">
+      
+      <div className="flex-1 flex flex-col lg:flex-row w-full z-10">
+        
+        {/* Left Side: Brand & Visuals */}
+        <div className="hidden lg:flex w-1/2 p-12 flex-col justify-between relative border-r border-white/5 bg-slate-900/20 backdrop-blur-sm">
+          {/* Decorative gradients */}
+          <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+            <div className="absolute top-[-10%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-600/10 blur-[100px]" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] rounded-full bg-emerald-600/10 blur-[100px]" />
+          </div>
 
-      <button
-        onClick={() => setDark(!dark)}
-        className="btn-icon"
-        style={{
-          position: "absolute",
-          top: "1.25rem",
-          right: "1.25rem",
-          zIndex: 10,
-        }}
-        aria-label="Toggle theme"
-      >
-        {dark ? <Sun size={17} /> : <Moon size={17} />}
-      </button>
+          <div className="relative z-10">
+            <div className="flex items-center gap-3 mb-16">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                <ShieldCheck className="text-white" size={24} />
+              </div>
+              <span className="font-bold text-2xl tracking-tight text-white">Event<span className="text-indigo-400">Core</span></span>
+            </div>
 
-      <div
-        className="card-glass"
-        style={{
-          width: "100%",
-          maxWidth: 430,
-          padding: "2rem",
-          borderRadius: "1.5rem",
-          position: "relative",
-          zIndex: 2,
-        }}
-      >
-        <div style={{ textAlign: "center", marginBottom: "1.75rem" }}>
-          <img 
-            src={logoImg} 
-            alt="Graphic Era Emblem" 
-            style={{
-              height: 90,
-              width: "auto",
-              margin: "0 auto 1.25rem",
-              display: "block",
-            }}
-          />
-          <h1
-            style={{
-              fontSize: "1.75rem",
-              fontWeight: 800,
-              color: "var(--text-primary)",
-              margin: "0 0 0.35rem",
-              letterSpacing: "-0.02em",
-            }}
-          >
-            Event Access Portal
-          </h1>
+            <h1 className="text-5xl font-extrabold text-white leading-[1.1] tracking-tight mb-6">
+              Access the <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-emerald-400">Command Center</span>
+            </h1>
+            <p className="text-lg text-slate-400 max-w-md leading-relaxed">
+              Securely authenticate to manage campaigns, monitor live checkpoints, and orchestrate massive events with sub-second QR validation.
+            </p>
 
-          <p
-            style={{
-              color: "var(--text-muted)",
-              fontSize: "0.9rem",
-              fontWeight: 500,
-              margin: 0,
-            }}
-          >
-          </p>
+            <div className="mt-12 space-y-6">
+              {[
+                { icon: <Lock size={20} className="text-indigo-400" />, title: "Zero-Trust Security", desc: "JWT authenticated sessions with role-based access control." },
+                { icon: <ScanLine size={20} className="text-emerald-400" />, title: "Live Analytics", desc: "Monitor entry bottlenecks and attendee flow in real-time." },
+                { icon: <CheckCircle2 size={20} className="text-purple-400" />, title: "Instant Sync", desc: "Checkpoints synchronize globally across all active volunteer devices." }
+              ].map((item, i) => (
+                <div key={i} className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-slate-800/50 border border-white/5 flex items-center justify-center shrink-0">
+                    {item.icon}
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white">{item.title}</h3>
+                    <p className="text-sm text-slate-400">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          <div className="relative z-10 text-slate-500 text-sm font-medium flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Systems Operational
+          </div>
         </div>
 
-
-
-        {error && (
-          <div
-            style={{
-              background: "var(--red-light)",
-              color: "var(--red)",
-              border: "1px solid var(--red)",
-              borderRadius: 12,
-              padding: "0.8rem 0.95rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              marginBottom: "1rem",
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        <form
-          onSubmit={handleLogin}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "1rem",
-          }}
-        >
-          <div>
-            <label className="input-label" htmlFor="login-user">
-              Username
-            </label>
-            <div style={{ position: "relative" }}>
-              <input
-                id="login-user"
-                className="input"
-                type="text"
-                placeholder="Enter username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                onFocus={() => setFocusedField("user")}
-                onBlur={() => setFocusedField(null)}
-                autoComplete="username"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck="false"
-                disabled={loading}
-                required
-                style={{ paddingLeft: "2.7rem" }}
+        {/* Right Side: Login Form */}
+        <div className="flex-1 flex items-center justify-center p-6 lg:p-12 relative z-10">
+          <div className="w-full max-w-md animate-fade-in">
+            <div className="text-center mb-10">
+              <img 
+                src={logoImg} 
+                alt="Logo" 
+                className="h-20 w-auto mx-auto mb-6 drop-shadow-2xl"
               />
-              <User
-                size={16}
-                style={{
-                  position: "absolute",
-                  left: "0.9rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color:
-                    focusedField === "user"
-                      ? "var(--brand)"
-                      : "var(--text-muted)",
-                }}
-              />
+              <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">Welcome Back</h2>
+              <p className="text-slate-400">Enter your credentials to access the portal</p>
             </div>
-          </div>
 
-          <div>
-            <label className="input-label" htmlFor="login-pass">
-              Password
-            </label>
-            <div style={{ position: "relative" }}>
-              <input
-                id="login-pass"
-                className="input"
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onFocus={() => setFocusedField("pass")}
-                onBlur={() => setFocusedField(null)}
-                autoComplete="current-password"
-                disabled={loading}
-                required
-                style={{
-                  paddingLeft: "2.7rem",
-                  paddingRight: "3rem",
-                }}
-              />
-              <ShieldCheck
-                size={16}
-                style={{
-                  position: "absolute",
-                  left: "0.9rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color:
-                    focusedField === "pass"
-                      ? "var(--brand)"
-                      : "var(--text-muted)",
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                style={{
-                  position: "absolute",
-                  right: "0.9rem",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-muted)",
-                  display: "flex",
-                  padding: 0,
-                }}
-              >
-                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
+            <div className="card-glass p-8">
+              {error && (
+                <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-3 animate-pop-in">
+                  <ShieldCheck className="text-red-400 shrink-0 mt-0.5" size={18} />
+                  <p className="text-sm font-medium text-red-200">{error}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleLogin} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2" htmlFor="login-user">
+                    Username
+                  </label>
+                  <div className="relative group">
+                    <input
+                      id="login-user"
+                      className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3.5 pl-11 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                      type="text"
+                      placeholder="admin_user"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      onFocus={() => setFocusedField("user")}
+                      onBlur={() => setFocusedField(null)}
+                      autoComplete="username"
+                      disabled={loading}
+                      required
+                    />
+                    <User
+                      size={18}
+                      className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${focusedField === 'user' ? 'text-indigo-400' : 'text-slate-500'}`}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2" htmlFor="login-pass">
+                    Password
+                  </label>
+                  <div className="relative group">
+                    <input
+                      id="login-pass"
+                      className="w-full bg-slate-900/50 border border-white/10 rounded-xl px-4 py-3.5 pl-11 pr-12 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setFocusedField("pass")}
+                      onBlur={() => setFocusedField(null)}
+                      autoComplete="current-password"
+                      disabled={loading}
+                      required
+                    />
+                    <Lock
+                      size={18}
+                      className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${focusedField === 'pass' ? 'text-indigo-400' : 'text-slate-500'}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors focus:outline-none"
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative w-4 h-4 rounded border border-white/20 bg-slate-900/50 flex items-center justify-center group-hover:border-indigo-400 transition-colors">
+                      <input 
+                        type="checkbox" 
+                        className="opacity-0 absolute inset-0 cursor-pointer"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                      />
+                      {rememberMe && <CheckCircle2 size={12} className="text-indigo-400" />}
+                    </div>
+                    <span className="text-sm text-slate-400 group-hover:text-slate-300 transition-colors">Remember me</span>
+                  </label>
+                  
+                  <button type="button" className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors">
+                    Forgot Password?
+                  </button>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full btn btn-primary py-3.5 rounded-xl text-base shadow-lg shadow-indigo-500/25 mt-4"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <span className="animate-spin w-5 h-5 border-2 border-white/20 border-t-white rounded-full" />
+                      Authenticating...
+                    </>
+                  ) : (
+                    <>
+                      Sign In to Console <ArrowRight size={18} />
+                    </>
+                  )}
+                </button>
+              </form>
             </div>
+            
+            <p className="text-center text-xs text-slate-500 mt-8 font-medium uppercase tracking-wider">
+              Authorized Personnel Only
+            </p>
           </div>
-
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={loading}
-            style={{
-              width: "100%",
-              marginTop: "0.25rem",
-              padding: "0.95rem",
-              borderRadius: "0.9rem",
-              fontSize: "0.95rem",
-              fontWeight: 700,
-            }}
-          >
-            {loading ? (
-              <>
-                <span
-                  style={{
-                    width: 18,
-                    height: 18,
-                    border: "2px solid rgba(255,255,255,0.25)",
-                    borderTopColor: "#fff",
-                    borderRadius: "50%",
-                  }}
-                  className="animate-spin"
-                />
-                Signing in...
-              </>
-            ) : (
-              <>
-                Continue <ArrowRight size={16} />
-              </>
-            )}
-          </button>
-        </form>
-
-        <p
-          style={{
-            textAlign: "center",
-            fontSize: "0.75rem",
-            color: "var(--text-muted)",
-            marginTop: "1.15rem",
-            fontWeight: 500,
-          }}
-        >
-          Protected event terminal access
-        </p>
+        </div>
       </div>
-      <div className="watermark">Designed by SAMEER LOHANI &amp; VARUN DOBHAL</div>
+
+      <GlobalFooter />
     </div>
   );
 }

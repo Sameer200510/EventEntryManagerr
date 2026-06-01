@@ -201,3 +201,67 @@ exports.retryFailed = async (req, res) => {
     res.status(500).json({ error: "Failed to retry jobs" });
   }
 };
+
+exports.getRecentJobs = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const jobs = await prisma.emailJob.findMany({
+      where: { campaignId: Number(id) },
+      include: { attendee: { select: { email: true, name: true } } },
+      orderBy: { updatedAt: "desc" },
+      take: 100
+    });
+    res.json(jobs);
+  } catch (error) {
+    console.error("Failed to fetch recent jobs:", error);
+    res.status(500).json({ error: "Failed to fetch recent jobs" });
+  }
+};
+
+exports.getCampaign = async (req, res) => {
+  console.log("getCampaign called with id:", req.params.id);
+  try {
+    const { id } = req.params;
+    const campaign = await prisma.emailCampaign.findUnique({
+      where: { id: Number(id) },
+      include: { template: true }
+    });
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+    res.json(campaign);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch campaign" });
+  }
+};
+
+exports.deleteCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if campaign is running
+    const campaign = await prisma.emailCampaign.findUnique({
+      where: { id: Number(id) }
+    });
+    
+    if (!campaign) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+    
+    if (campaign.status === "RUNNING") {
+      return res.status(400).json({ error: "Cannot delete a running campaign. Please pause or cancel it first." });
+    }
+
+    // Delete associated jobs first due to foreign key constraints
+    await prisma.emailJob.deleteMany({
+      where: { campaignId: Number(id) }
+    });
+
+    await prisma.emailCampaign.delete({
+      where: { id: Number(id) }
+    });
+
+    res.json({ message: "Campaign deleted successfully." });
+  } catch (error) {
+    console.error("Failed to delete campaign:", error);
+    res.status(500).json({ error: "Failed to delete campaign." });
+  }
+};

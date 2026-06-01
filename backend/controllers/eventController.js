@@ -3,7 +3,8 @@ const prisma = require("../prismaClient");
 exports.getAllEvents = async (req, res) => {
   try {
     const events = await prisma.event.findMany({
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      include: { checkpoints: { orderBy: { order: "asc" } } }
     });
     res.json(events);
   } catch (error) {
@@ -14,7 +15,8 @@ exports.getAllEvents = async (req, res) => {
 exports.getEventById = async (req, res) => {
   try {
     const event = await prisma.event.findUnique({
-      where: { id: parseInt(req.params.id) }
+      where: { id: parseInt(req.params.id) },
+      include: { checkpoints: { orderBy: { order: "asc" } } }
     });
     if (!event) return res.status(404).json({ error: "Event not found" });
     res.json(event);
@@ -23,9 +25,22 @@ exports.getEventById = async (req, res) => {
   }
 };
 
+exports.getActiveEvent = async (req, res) => {
+  try {
+    const event = await prisma.event.findFirst({
+      where: { isActive: true },
+      include: { checkpoints: { orderBy: { order: "asc" } } }
+    });
+    if (!event) return res.status(404).json({ error: "No active event found" });
+    res.json(event);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch active event." });
+  }
+};
+
 exports.createEvent = async (req, res) => {
   try {
-    const { name, type, date, venue, bannerImage, description, entryTiming, exitTiming } = req.body;
+    const { name, type, date, venue, bannerImage, description, entryTiming, exitTiming, isSequential, checkpoints } = req.body;
     
     // Auto-activate the first event or if none are active
     const activeCount = await prisma.event.count({ where: { isActive: true } });
@@ -40,9 +55,21 @@ exports.createEvent = async (req, res) => {
         description,
         entryTiming,
         exitTiming,
-        isActive: activeCount === 0
+        isActive: activeCount === 0,
+        isSequential: isSequential || false
       }
     });
+
+    if (checkpoints && Array.isArray(checkpoints) && checkpoints.length > 0) {
+      const cps = checkpoints.map((c, i) => ({
+        eventId: event.id,
+        name: c.name,
+        order: c.order !== undefined ? c.order : i,
+        isActive: c.isActive !== undefined ? c.isActive : true
+      }));
+      await prisma.checkpoint.createMany({ data: cps });
+    }
+
     res.status(201).json(event);
   } catch (error) {
     res.status(500).json({ error: "Failed to create event." });
@@ -51,7 +78,7 @@ exports.createEvent = async (req, res) => {
 
 exports.updateEvent = async (req, res) => {
   try {
-    const { name, type, date, venue, bannerImage, description, entryTiming, exitTiming } = req.body;
+    const { name, type, date, venue, bannerImage, description, entryTiming, exitTiming, isSequential } = req.body;
     const event = await prisma.event.update({
       where: { id: parseInt(req.params.id) },
       data: {
@@ -62,7 +89,8 @@ exports.updateEvent = async (req, res) => {
         bannerImage,
         description,
         entryTiming,
-        exitTiming
+        exitTiming,
+        isSequential
       }
     });
     res.json(event);

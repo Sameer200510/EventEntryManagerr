@@ -4,6 +4,7 @@ const eventController = require('../controllers/eventController');
 const { protect, authorize } = require('../middleware/auth');
 
 router.get('/', protect, eventController.getAllEvents);
+router.get('/active', protect, eventController.getActiveEvent);
 router.get('/:id', protect, eventController.getEventById);
 router.post('/', protect, authorize("ADMIN"), eventController.createEvent);
 router.put('/:id', protect, authorize("ADMIN"), eventController.updateEvent);

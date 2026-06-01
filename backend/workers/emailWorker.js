@@ -115,13 +115,18 @@ const processQueue = async () => {
       }
     }
 
+    // Calculate absolute stats for perfect accuracy
+    const sentCount = await prisma.emailJob.count({ where: { campaignId: activeCampaign.id, status: "SENT" } });
+    const failedCount = await prisma.emailJob.count({ where: { campaignId: activeCampaign.id, status: { in: ["FAILED", "PERM_FAILED"] } } });
+    const pendingCount = await prisma.emailJob.count({ where: { campaignId: activeCampaign.id, status: { in: ["PENDING", "PROCESSING"] } } });
+
     // Update Campaign Stats
     await prisma.emailCampaign.update({
       where: { id: activeCampaign.id },
       data: {
-        sentCount: { increment: successCount },
-        failedCount: { increment: failCount },
-        pendingCount: { decrement: jobs.length }
+        sentCount,
+        failedCount,
+        pendingCount
       }
     });
 

@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const dns = require("node:dns");
 const cors = require("cors");
+const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 // Force IPv4 first (helps on Render / cloud envs)
@@ -11,6 +12,12 @@ if (dns.setDefaultResultOrder) {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+/* 
+   SECURITY HEADERS
+ */
+app.use(helmet());
+app.disable("x-powered-by");
 
 /* 
    CORS FIX
@@ -64,6 +71,9 @@ const otpLimiter = rateLimit({
 /* 
    ROUTES
  */
+const eventRoutes = require("./routes/eventRoutes");
+const checkpointRoutes = require("./routes/checkpointRoutes");
+
 app.use("/api/auth", require("./routes/authRoutes"));
 
 app.use("/api/attendees/scan", scanLimiter);
@@ -72,7 +82,8 @@ app.use("/api/attendees", require("./routes/attendeeRoutes"));
 app.use("/api/otp/send", otpLimiter);
 app.use("/api/otp", require("./routes/otpRoutes"));
 app.use("/api/settings", require("./routes/settingsRoutes"));
-app.use("/api/events", require("./routes/eventRoutes"));
+app.use("/api/events", eventRoutes);
+app.use("/api/checkpoints", checkpointRoutes);
 app.use("/api/campaigns", require("./routes/campaignRoutes"));
 
 /* 
@@ -166,8 +177,9 @@ app.get("/verify/:token", async (req, res) => {
  */
 app.use((err, req, res, next) => {
   console.error("Server error:", err.message);
+  const isProduction = process.env.NODE_ENV === "production";
   res.status(500).json({
-    error: err.message || "Internal Server Error",
+    error: isProduction ? "Internal Server Error" : (err.message || "Internal Server Error"),
   });
 });
 
