@@ -17,7 +17,11 @@ const getProviderDelay = (provider, batchSize, requestedDelay) => {
     // SES is typically 14/sec. Let's do 100ms per email to be safe.
     return Math.max(requestedDelay, batchSize * 100);
   }
-  return requestedDelay; // Resend handles burst nicely, stick to requested
+  if (provider.name === "RESEND") {
+    // Resend free tier allows 2 requests per second. Let's do 550ms per email.
+    return Math.max(requestedDelay, batchSize * 550);
+  }
+  return requestedDelay; 
 };
 
 const processQueue = async () => {

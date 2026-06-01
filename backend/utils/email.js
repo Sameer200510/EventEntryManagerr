@@ -115,6 +115,19 @@ const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", t
       `;
     }
 
+    if (!htmlContent.toLowerCase().includes('<html')) {
+      htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0; padding:0;">
+  ${htmlContent}
+</body>
+</html>`;
+    }
+
     let response;
     
     if (provider.name === "RESEND") {
@@ -128,8 +141,6 @@ const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", t
             filename: 'qrcode.png',
             content: Buffer.from(qrCodeDataUrl.split(',')[1], 'base64'),
             content_id: 'qrcode',
-            content_type: 'image/png',
-            disposition: 'inline',
           },
         ],
       });
