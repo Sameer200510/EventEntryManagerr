@@ -29,6 +29,7 @@ enum ProviderType {
   RESEND
   GOOGLE
   AWS_SES
+  SMTP
 }
 
 model User {
