@@ -175,10 +175,8 @@ app.use((err, req, res, next) => {
    START SERVER
  */
 const { startWorker } = require("./workers/emailWorker");
-const migrateLegacyData = require("./scripts/migrateLegacy");
 
 app.listen(PORT, async () => {
   console.log(`Server is running on http://localhost:${PORT}`);
-  await migrateLegacyData();
   startWorker();
 });
