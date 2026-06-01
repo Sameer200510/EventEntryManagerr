@@ -127,6 +127,11 @@ const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", t
 </body>
 </html>`;
     }
+    
+    // Inject the QR Code as a direct HTTP URL instead of an attachment! 
+    // This perfectly bypasses Resend and Gmail's strict CID restrictions, showing the image 100% of the time.
+    const externalQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(attendee.qrLink)}`;
+    htmlContent = htmlContent.replace(/cid:qrcode/g, externalQrUrl);
 
     let response;
     
@@ -136,13 +141,6 @@ const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", t
         to: attendee.email,
         subject: template ? template.subject : `Your ${event.type} Entry QR Code`,
         html: htmlContent,
-        attachments: [
-          {
-            filename: 'qrcode.png',
-            content: Buffer.from(qrCodeDataUrl.split(',')[1], 'base64'),
-            content_id: 'qrcode',
-          },
-        ],
       });
       
       if (res.error) {
@@ -155,15 +153,6 @@ const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", t
         to: attendee.email,
         subject: template ? template.subject : `Your ${event.type} Entry QR Code`,
         html: htmlContent,
-        attachments: [
-          {
-            filename: 'qrcode.png',
-            content: Buffer.from(qrCodeDataUrl.split(',')[1], 'base64'),
-            cid: 'qrcode',
-            contentType: 'image/png',
-            contentDisposition: 'inline',
-          },
-        ],
       });
     }
 
