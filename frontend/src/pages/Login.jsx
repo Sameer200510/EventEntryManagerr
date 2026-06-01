@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import api from "../utils/api";
 import { useTheme } from "../context/ThemeContext";
+import logoImg from "../assets/logo.png";
 
 const ALLOWED_ROLES = ["ADMIN", "ENTRY_VOLUNTEER", "FOOD_VOLUNTEER"];
 
@@ -72,6 +73,8 @@ export default function Login({ setRole }) {
 
     setLoading(true);
 
+
+
     try {
       const { data } = await api.post("/auth/login", {
         username: cleanUser,
@@ -99,31 +102,14 @@ export default function Login({ setRole }) {
 
       setError(
         err.response?.data?.error ||
-          err.message ||
-          "Invalid credentials. Please try again.",
+        err.message ||
+        "Invalid credentials. Please try again.",
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const roles = [
-    {
-      icon: <ShieldCheck size={14} />,
-      label: "ADMIN",
-      hint: "Dashboard",
-    },
-    {
-      icon: <User size={14} />,
-      label: "ENTRY_VOLUNTEER",
-      hint: "Gate Access",
-    },
-    {
-      icon: <Utensils size={14} />,
-      label: "FOOD_VOLUNTEER",
-      hint: "Food Access",
-    },
-  ];
 
   const pageBg = dark
     ? "#050816"
@@ -187,22 +173,16 @@ export default function Login({ setRole }) {
         }}
       >
         <div style={{ textAlign: "center", marginBottom: "1.75rem" }}>
-          <div
+          <img 
+            src={logoImg} 
+            alt="Graphic Era Emblem" 
             style={{
-              width: 72,
-              height: 72,
-              borderRadius: 22,
-              margin: "0 auto 1rem",
-              background: "linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              boxShadow: "0 10px 30px rgba(79,70,229,0.35)",
+              height: 90,
+              width: "auto",
+              margin: "0 auto 1.25rem",
+              display: "block",
             }}
-          >
-            <ScanLine size={34} color="#fff" strokeWidth={1.8} />
-          </div>
-
+          />
           <h1
             style={{
               fontSize: "1.75rem",
@@ -223,56 +203,10 @@ export default function Login({ setRole }) {
               margin: 0,
             }}
           >
-            Secure role-based access for event operations
           </p>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr",
-            gap: "0.55rem",
-            marginBottom: "1.4rem",
-          }}
-        >
-          {roles.map((role) => (
-            <div
-              key={role.label}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "0.8rem 0.9rem",
-                borderRadius: 14,
-                border: "1px solid var(--border)",
-                background: "var(--surface-2)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.65rem",
-                  fontSize: "0.8rem",
-                  fontWeight: 700,
-                  color: "var(--text-primary)",
-                }}
-              >
-                {role.icon}
-                {role.label}
-              </div>
-              <span
-                style={{
-                  fontSize: "0.72rem",
-                  fontWeight: 600,
-                  color: "var(--text-muted)",
-                }}
-              >
-                {role.hint}
-              </span>
-            </div>
-          ))}
-        </div>
+
 
         {error && (
           <div
@@ -314,6 +248,9 @@ export default function Login({ setRole }) {
                 onFocus={() => setFocusedField("user")}
                 onBlur={() => setFocusedField(null)}
                 autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
                 disabled={loading}
                 required
                 style={{ paddingLeft: "2.7rem" }}
@@ -437,6 +374,7 @@ export default function Login({ setRole }) {
           Protected event terminal access
         </p>
       </div>
+      <div className="watermark">Designed by SAMEER LOHANI &amp; VARUN DOBHAL</div>
     </div>
   );
 }

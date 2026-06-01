@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 5000;
 /* 
    CORS FIX
  */
-const allowedOrigins = ["http://localhost:5173", "http://127.0.0.1:5173"];
+const allowedOrigins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://localhost:5175"];
 
 const corsOptions = {
   origin(origin, callback) {
@@ -71,6 +71,9 @@ app.use("/api/attendees", require("./routes/attendeeRoutes"));
 
 app.use("/api/otp/send", otpLimiter);
 app.use("/api/otp", require("./routes/otpRoutes"));
+app.use("/api/settings", require("./routes/settingsRoutes"));
+app.use("/api/events", require("./routes/eventRoutes"));
+app.use("/api/campaigns", require("./routes/campaignRoutes"));
 
 /* 
    HEALTH CHECK
@@ -171,6 +174,11 @@ app.use((err, req, res, next) => {
 /* 
    START SERVER
  */
-app.listen(PORT, () => {
+const { startWorker } = require("./workers/emailWorker");
+const migrateLegacyData = require("./scripts/migrateLegacy");
+
+app.listen(PORT, async () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+  await migrateLegacyData();
+  startWorker();
 });

@@ -7,7 +7,8 @@
     "dev": "node index.js",
     "start": "node index.js",
     "seed": "node seed.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate": "prisma db push --accept-data-loss && prisma generate"
   },
   "keywords": [],
   "author": "",
@@ -29,6 +30,7 @@
     "pg": "^8.20.0",
     "prisma": "^7.8.0",
     "qrcode": "^1.5.4",
+    "resend": "^6.12.4",
     "uuid": "^14.0.0",
     "xlsx": "^0.18.5"
   }

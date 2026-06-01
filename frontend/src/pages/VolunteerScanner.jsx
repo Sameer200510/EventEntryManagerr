@@ -4,6 +4,7 @@ import { BadgeCheck, XCircle, Lock, Send, KeyRound, CameraOff, LogOut, ScanLine,
 import api from '../utils/api';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
+import logoImg from '../assets/logo.png';
 
 export default function VolunteerScanner({ role, onLogout }) {
   const [permState, setPermState]   = useState('asking');
@@ -48,7 +49,11 @@ export default function VolunteerScanner({ role, onLogout }) {
   const initCamera = async () => {
     setPermState('asking');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      const constraints = {
+        video: { facingMode: 'environment' },
+        audio: false
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
       if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); }
       setPermState('granted');
@@ -68,10 +73,16 @@ export default function VolunteerScanner({ role, onLogout }) {
   const scanFrame = () => {
     const v = videoRef.current, c = canvasRef.current;
     if (!v || !c || v.readyState < v.HAVE_ENOUGH_DATA) { rafRef.current = requestAnimationFrame(scanFrame); return; }
-    c.width = v.videoWidth || 640; c.height = v.videoHeight || 480;
+    // Scale down for mobile performance (cap width at 600px)
+    const scale = Math.min(1, 600 / (v.videoWidth || 640));
+    c.width = (v.videoWidth || 640) * scale; 
+    c.height = (v.videoHeight || 480) * scale;
+    
     const ctx = c.getContext('2d', { willReadFrequently: true });
     ctx.drawImage(v, 0, 0, c.width, c.height);
     const imgData = ctx.getImageData(0, 0, c.width, c.height);
+    
+    // Invert attempts can be costly, 'dontInvert' is much faster for dark codes on light bg
     const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
     if (code?.data && !isScanRef.current && !loadingRef.current) { 
       isScanRef.current = true; 
@@ -152,8 +163,8 @@ export default function VolunteerScanner({ role, onLogout }) {
       {/* Top Bar */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 1rem', height: 54, background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(255,255,255,0.07)', zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: accentGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 4px 14px ${accentGlow}` }}>
-            {isFood ? <Utensils size={17} color="#fff"/> : <ScanLine size={17} color="#fff"/>}
+          <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img src={logoImg} alt="Logo" style={{ height: "100%", width: "auto", objectFit: "contain" }} />
           </div>
           <div>
             <p style={{ color: '#fff', fontWeight: 800, fontSize: '0.875rem', lineHeight: 1, margin: 0 }}>{scanLabel} Scanner</p>
@@ -246,7 +257,7 @@ export default function VolunteerScanner({ role, onLogout }) {
                 <form onSubmit={handleSendOtp} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                   <div>
                     <label className="input-label" htmlFor="otp-roll">Roll Number</label>
-                    <input id="otp-roll" className="input" type="text" placeholder="Enter roll number" value={roll} onChange={e => setRoll(e.target.value)} required disabled={loading}/>
+                    <input id="otp-roll" className="input" type="text" placeholder="Enter roll number" value={roll} onChange={e => setRoll(e.target.value)} required disabled={loading} autoCapitalize="none" autoCorrect="off" spellCheck="false" />
                   </div>
                   <button type="submit" className="btn btn-primary" disabled={loading} style={{ width: '100%' }}>
                     {loading ? <><span style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', borderRadius: '50%' }} className="animate-spin"/></> : <><Send size={15}/> Send OTP</>}
@@ -259,7 +270,7 @@ export default function VolunteerScanner({ role, onLogout }) {
                   </div>
                   <div>
                     <label className="input-label" htmlFor="otp-code">OTP Code</label>
-                    <input id="otp-code" className="input" type="text" placeholder="______" value={otp} onChange={e => setOtp(e.target.value)} maxLength={6} required disabled={loading} style={{ fontSize: '1.75rem', letterSpacing: '0.4em', textAlign: 'center', fontWeight: 800 }}/>
+                    <input id="otp-code" className="input" type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="one-time-code" placeholder="______" value={otp} onChange={e => setOtp(e.target.value)} maxLength={6} required disabled={loading} style={{ fontSize: '1.75rem', letterSpacing: '0.4em', textAlign: 'center', fontWeight: 800 }}/>
                   </div>
                   <button type="submit" className="btn btn-success" disabled={loading} style={{ width: '100%' }}>
                     {loading ? <span style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.25)', borderTopColor: '#fff', borderRadius: '50%' }} className="animate-spin"/> : <><BadgeCheck size={15}/> Verify &amp; Admit</>}

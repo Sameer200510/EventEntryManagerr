@@ -1,98 +1,232 @@
-const { google } = require('googleapis');
+const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
+const prisma = require("../prismaClient");
+const { decryptJSON } = require("./crypto");
 
-/**
- * Send QR Email to attendee using Gmail HTTP API
- * This bypasses SMTP blocks and connection timeouts entirely.
- */
-const sendQrEmail = async (attendee, qrCodeDataUrl, customMessage = '') => {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    'https://developers.google.com/oauthplayground'
-  );
+const BULK_BATCH_SIZE = 20;
+const BATCH_DELAY_MS = 1500;
 
-  oauth2Client.setCredentials({
-    refresh_token: process.env.GMAIL_REFRESH_TOKEN
+const DRIVE_LINK =
+  "https://drive.google.com/file/d/1Ub73iPyrnTLPUwytr4GQV311u-7emDjd/view?usp=sharing";
+
+let cachedProvider = null;
+let providerInstance = null;
+
+const getProvider = async () => {
+  const provider = await prisma.emailProvider.findFirst({
+    where: { isActive: true },
   });
 
-  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-  if (!attendee.email) {
-    console.log(`[SKIP_EMAIL] Attendee ${attendee.roll} has no email.`);
-    return;
+  if (!provider) {
+    throw new Error("No active email provider configured.");
   }
 
-  // Use the custom message from admin, or nothing if empty
-  const messageHtml = customMessage 
-    ? `<div style="background-color: #EEF2FF; padding: 20px; border-radius: 12px; margin-bottom: 25px; border-left: 5px solid #4F46E5; color: #3730A3; font-size: 16px; line-height: 1.6;">${customMessage}</div>` 
-    : '';
+  if (cachedProvider && cachedProvider.id === provider.id && cachedProvider.updatedAt.getTime() === provider.updatedAt.getTime()) {
+    return { provider: cachedProvider, instance: providerInstance };
+  }
 
-  const htmlContent = `
-    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #e5e7eb; border-radius: 20px; background-color: #ffffff;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h2 style="color: #111827; margin: 0; font-size: 24px; font-weight: 800;">Hello, ${attendee.name}!</h2>
-      </div>
-      
-      ${messageHtml}
-      
-      <div style="text-align: center; margin: 40px 0; background: #f9fafb; padding: 30px; border-radius: 16px; border: 2px dashed #e5e7eb;">
-        <img src="cid:qrcode" alt="QR Code" style="width: 220px; height: 220px; display: block; margin: 0 auto;" />
-        <p style="margin-top: 15px; font-size: 14px; color: #6b7280; font-weight: 600;">Scan this at the entry gate</p>
-      </div>
+  const credentials = decryptJSON(provider.credentials);
+  let instance = null;
 
-      <div style="background-color: #f3f4f6; padding: 20px; border-radius: 12px; margin-bottom: 25px;">
-        <p style="margin: 0; font-size: 12px; color: #9ca3af; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;">Your Personal Access Link</p>
-        <p style="margin: 8px 0 0 0; word-break: break-all; font-size: 14px;"><a href="${attendee.qrLink}" style="color: #4F46E5; text-decoration: none; font-weight: 600;">${attendee.qrLink}</a></p>
-      </div>
-
-      <div style="text-align: center; border-top: 1px solid #eee; padding-top: 25px;">
-        <p style="font-size: 12px; color: #9ca3af; margin: 0;">&copy; ${new Date().getFullYear()} Event Management Team</p>
-      </div>
-    </div>
-  `;
-
-  // Build MIME Message with Inline Attachment
-  const boundary = 'custom_boundary_qr_event';
-  const nl = '\n';
-  const imageData = qrCodeDataUrl.split('base64,')[1];
-  
-  const str = [
-    `To: ${attendee.email}`,
-    `Subject: Your Event Entry Access Code`,
-    `Content-Type: multipart/related; boundary=${boundary}`,
-    nl,
-    `--${boundary}`,
-    `Content-Type: text/html; charset=utf-8`,
-    nl,
-    htmlContent,
-    nl,
-    `--${boundary}`,
-    `Content-Type: image/png`,
-    `Content-Transfer-Encoding: base64`,
-    `Content-ID: <qrcode>`,
-    `Content-Disposition: inline; filename="qrcode.png"`,
-    nl,
-    imageData,
-    nl,
-    `--${boundary}--`
-  ].join('\n');
-
-  const encodedMail = Buffer.from(str).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-  try {
-    await gmail.users.messages.send({
-      userId: 'me',
-      requestBody: {
-        raw: encodedMail
-      }
+  if (provider.name === "RESEND") {
+    instance = new Resend(credentials.apiKey);
+  } else if (provider.name === "GOOGLE") {
+    instance = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        type: "OAuth2",
+        user: provider.senderEmail,
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
+        refreshToken: credentials.refreshToken,
+      },
     });
-    console.log(`Tidy QR Email sent via Gmail API to ${attendee.email}`);
+  } else if (provider.name === "AWS_SES") {
+    instance = nodemailer.createTransport({
+      host: `email-smtp.${credentials.region}.amazonaws.com`,
+      port: 465,
+      secure: true,
+      auth: {
+        user: credentials.accessKey,
+        pass: credentials.secretKey,
+      },
+    });
+  } else if (provider.name === "SMTP") {
+    instance = nodemailer.createTransport({
+      host: credentials.host,
+      port: Number(credentials.port),
+      secure: Number(credentials.port) === 465,
+      auth: {
+        user: credentials.username,
+        pass: credentials.password,
+      },
+    });
+  }
+
+  cachedProvider = provider;
+  providerInstance = instance;
+
+  return { provider, instance };
+};
+
+const sendQrEmail = async (attendee, event, qrCodeDataUrl, customMessage = "", template = null, trackingId = null) => {
+  try {
+    if (!attendee.email) {
+      console.log(`[SKIP_EMAIL] ${attendee.roll} has no email`);
+      return { success: false, email: attendee.email };
+    }
+
+    const { provider, instance } = await getProvider();
+
+    const messageHtml = customMessage ? `
+      <div style="background:#EEF2FF; padding:18px; border-radius:14px; margin-bottom:24px; border-left:5px solid #4F46E5; color:#3730A3; font-size:15px; line-height:1.7; white-space:pre-wrap; word-break:break-word;">
+        ${customMessage}
+      </div>
+    ` : "";
+
+    let htmlContent = "";
+    
+    // Server base URL for tracking pixel
+    const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5001";
+    const trackingPixel = trackingId ? `<img src="${BACKEND_URL}/api/campaigns/track/${trackingId}" width="1" height="1" style="display:none;" />` : "";
+
+    if (template) {
+      htmlContent = template.htmlBody
+        .replace(/{{name}}/g, attendee.name || "")
+        .replace(/{{event_name}}/g, event.name || "")
+        .replace(/{{event_type}}/g, event.type || "")
+        .replace(/{{event_date}}/g, new Date(event.date).toLocaleDateString())
+        .replace(/{{event_venue}}/g, event.venue || "")
+        .replace(/{{qr_code}}/g, `<img src="cid:qrcode" alt="QR Code" style="width:240px; height:240px;" />`)
+        .replace(/{{qr_link}}/g, attendee.qrLink || "");
+        
+      htmlContent += trackingPixel;
+    } else {
+      htmlContent = `
+        <div style="font-family:Arial,sans-serif; text-align:center; padding: 20px;">
+          ${messageHtml || `<p style="font-size: 16px;">Here is your Entry Pass for <strong>${event.name}</strong></p>`}
+          <div style="margin: 20px 0;">
+            <img src="cid:qrcode" alt="QR Code" style="width:240px; height:240px; display:inline-block;" />
+          </div>
+          <p style="font-size: 14px; color: #666;">Scan this QR code at the entry gate.</p>
+          <p style="font-size: 12px; margin-top: 30px;"><a href="${attendee.qrLink}">View Pass Online</a></p>
+        </div>
+        ${trackingPixel}
+      `;
+    }
+
+    let response;
+    
+    if (provider.name === "RESEND") {
+      const res = await instance.emails.send({
+        from: provider.senderEmail,
+        to: attendee.email,
+        subject: template ? template.subject : `Your ${event.type} Entry QR Code`,
+        html: htmlContent,
+        attachments: [
+          {
+            filename: 'qrcode.png',
+            content: Buffer.from(qrCodeDataUrl.split(',')[1], 'base64'),
+            content_id: 'qrcode',
+            content_type: 'image/png',
+            disposition: 'inline',
+          },
+        ],
+      });
+      
+      if (res.error) {
+        throw new Error(res.error.message || JSON.stringify(res.error));
+      }
+      response = res.data;
+    } else {
+      response = await instance.sendMail({
+        from: provider.senderEmail,
+        to: attendee.email,
+        subject: template ? template.subject : `Your ${event.type} Entry QR Code`,
+        html: htmlContent,
+        attachments: [
+          {
+            filename: 'qrcode.png',
+            content: Buffer.from(qrCodeDataUrl.split(',')[1], 'base64'),
+            cid: 'qrcode',
+            contentType: 'image/png',
+            contentDisposition: 'inline',
+          },
+        ],
+      });
+    }
+
+    console.log(`[EMAIL_SENT] ${attendee.email}`);
+
+    return {
+      success: true,
+      email: attendee.email,
+      response,
+    };
   } catch (error) {
-    console.error(`Failed to send QR Email to ${attendee.email}:`, error.message);
-    throw error;
+    console.error(`[EMAIL_FAILED] ${attendee.email}`, error.message);
+
+    return {
+      success: false,
+      email: attendee.email,
+      error: error.message,
+    };
   }
 };
 
+const sendBulkQrEmails = async (
+  attendees,
+  qrGeneratorFunction,
+  customMessage = "",
+) => {
+  const results = [];
+
+  console.log(`Starting bulk email sending to ${attendees.length} attendees`);
+
+  for (let i = 0; i < attendees.length; i += BULK_BATCH_SIZE) {
+    const batch = attendees.slice(i, i + BULK_BATCH_SIZE);
+
+    console.log(`Processing batch ${Math.floor(i / BULK_BATCH_SIZE) + 1}`);
+
+    const batchResults = await Promise.all(
+      batch.map(async (attendee) => {
+        try {
+          const qrCodeDataUrl = await qrGeneratorFunction(attendee);
+          return await sendQrEmail(attendee, qrCodeDataUrl, customMessage);
+        } catch (err) {
+          console.error(
+            `[QR_GENERATION_FAILED] ${attendee.email}`,
+            err.message,
+          );
+
+          return {
+            success: false,
+            email: attendee.email,
+            error: err.message,
+          };
+        }
+      }),
+    );
+
+    results.push(...batchResults);
+
+    if (i + BULK_BATCH_SIZE < attendees.length) {
+      console.log(`Waiting ${BATCH_DELAY_MS}ms before next batch...`);
+      await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
+    }
+  }
+
+  console.log(`
+========================================
+BULK EMAIL COMPLETED
+========================================
+`);
+
+  return results;
+};
+
 module.exports = {
-  sendQrEmail
+  sendQrEmail,
+  sendBulkQrEmails,
+  getProvider
 };

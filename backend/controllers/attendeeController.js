@@ -307,7 +307,7 @@ exports.parseExcel = (req, res) => {
   }
 };
 
-exports.uploadExcel = async (req, res) => {
+exports.validateExcel = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No Excel file provided." });
@@ -347,7 +347,104 @@ exports.uploadExcel = async (req, res) => {
         .json({ error: "Excel sheet is empty or only contains headers." });
     }
 
-    const allValidRolls = [];
+    let totalRows = rawData.length;
+    let validRows = 0;
+    let duplicateEmails = 0;
+    let duplicateRolls = 0;
+    let invalidEmails = 0;
+
+    const seenRolls = new Set();
+    const seenEmails = new Set();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    for (const row of rawData) {
+      const name = row[nameField] ? String(row[nameField]).trim() : "";
+      const rawRoll = row[rollField] ? String(row[rollField]).trim() : "";
+      const roll = rawRoll.toUpperCase();
+      const email = emailField && row[emailField] ? String(row[emailField]).trim() : "";
+
+      if (!name || !roll) {
+        continue;
+      }
+
+      if (seenRolls.has(roll)) {
+        duplicateRolls++;
+      } else {
+        seenRolls.add(roll);
+        validRows++;
+      }
+
+      if (email) {
+        if (!emailRegex.test(email)) {
+          invalidEmails++;
+        } else if (seenEmails.has(email.toLowerCase())) {
+          duplicateEmails++;
+        } else {
+          seenEmails.add(email.toLowerCase());
+        }
+      }
+    }
+
+    return res.json({
+      totalRows,
+      validRows,
+      duplicateRolls,
+      duplicateEmails,
+      invalidEmails
+    });
+
+  } catch (error) {
+    console.error("Error validating Excel:", error);
+    return res.status(500).json({ error: "Failed to validate Excel file." });
+  }
+};
+
+exports.uploadExcel = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No Excel file provided." });
+    }
+
+    if (!req.body.mapping) {
+      return res.status(400).json({ error: "No field mapping provided." });
+    }
+
+    const eventName = req.body.eventName || "Untitled Event";
+    const eventId = req.body.eventId;
+    if (!eventId) {
+      return res.status(400).json({ error: "eventId is required." });
+    }
+
+    let fieldMapping;
+    try {
+      fieldMapping = JSON.parse(req.body.mapping);
+    } catch {
+      return res.status(400).json({ error: "Invalid field mapping JSON." });
+    }
+
+    const {
+      name: nameField,
+      roll: rollField,
+      email: emailField,
+    } = fieldMapping;
+
+    if (!nameField || !rollField) {
+      return res
+        .status(400)
+        .json({ error: 'Mapping must include "name" and "roll".' });
+    }
+
+    const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rawData = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+
+    if (rawData.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Excel sheet is empty or only contains headers." });
+    }
+
     const parsedData = rawData.map((row) => {
       const name = row[nameField] ? String(row[nameField]).trim() : "";
       const rawRoll = row[rollField] ? String(row[rollField]).trim() : "";
@@ -365,25 +462,15 @@ exports.uploadExcel = async (req, res) => {
 
       if (!name || !roll) {
         record.status = "Error - Missing required field(s)";
-      } else {
-        allValidRolls.push(roll);
       }
 
       return record;
     });
 
-    const existingAttendees = await prisma.attendee.findMany({
-      where: { roll: { in: allValidRolls } },
-      select: { roll: true },
-    });
-
-    const existingRollSet = new Set(
-      existingAttendees.map((a) => a.roll.toUpperCase()),
-    );
-
     const seenRollsInFile = new Set();
     const newAttendees = [];
     const outputData = [];
+    let validRecordsCount = 0;
 
     const frontendHost =
       process.env.FRONTEND_URL || `${req.protocol}://${req.get("host")}`;
@@ -397,12 +484,11 @@ exports.uploadExcel = async (req, res) => {
         continue;
       }
 
-      if (existingRollSet.has(record.roll)) {
-        outRow.Status = "Skipped - Duplicate in DB";
-      } else if (seenRollsInFile.has(record.roll)) {
+      if (seenRollsInFile.has(record.roll)) {
         outRow.Status = "Skipped - Duplicate in File";
       } else {
         seenRollsInFile.add(record.roll);
+        validRecordsCount++;
 
         const token = uuidv4();
         const qrLink = `${frontendHost}/verify/${token}`;
@@ -423,9 +509,30 @@ exports.uploadExcel = async (req, res) => {
       outputData.push(outRow);
     }
 
-    if (newAttendees.length > 0) {
+    // Deactivate previous datasets
+    await prisma.uploadDataset.updateMany({
+      where: { isActive: true },
+      data: { isActive: false }
+    });
+
+    // Create new dataset
+    const      dataset = await prisma.uploadDataset.create({
+        data: {
+          eventName,
+          eventId: Number(eventId),
+          totalRecords: 0,
+          validRecords: 0,
+          isActive: false, 
+          uploadedById: req.user?.userId || null,
+        },
+      });
+
+    // Add datasetId to new attendees
+    const attendeesToCreate = newAttendees.map(a => ({ ...a, datasetId: dataset.id, eventId: Number(eventId) }));
+
+    if (attendeesToCreate.length > 0) {
       await prisma.attendee.createMany({
-        data: newAttendees,
+        data: attendeesToCreate,
         skipDuplicates: true,
       });
     }
@@ -491,6 +598,7 @@ exports.sendManualEmail = async (req, res) => {
 
     const attendee = await prisma.attendee.findUnique({
       where: { id: attendeeId },
+      include: { event: true }
     });
 
     if (!attendee) {
@@ -502,7 +610,7 @@ exports.sendManualEmail = async (req, res) => {
     }
 
     const qrCodeDataUrl = await QRCode.toDataURL(attendee.qrLink);
-    await sendQrEmail(attendee, qrCodeDataUrl, message);
+    await sendQrEmail(attendee, attendee.event, qrCodeDataUrl, message);
 
     return res.status(200).json({
       message: `QR Code sent to ${attendee.email}`,
@@ -513,16 +621,147 @@ exports.sendManualEmail = async (req, res) => {
   }
 };
 
-exports.sendBulkEmails = async (req, res) => {
-  return res.status(501).json({
-    error:
-      "Bulk email sending is not enabled yet. Add email queueing and delivery tracking before enabling this feature.",
-  });
+exports.startCampaign = async (req, res) => {
+  try {
+    const { batchSize = 50, delayMs = 10000, providerName = "RESEND", eventId } = req.body;
+    if (!eventId) return res.status(400).json({ error: "eventId is required" });
+
+    // Verify no running campaign for this event
+    const running = await prisma.emailCampaign.findFirst({
+      where: { status: "RUNNING", eventId: Number(eventId) }
+    });
+    if (running) {
+      return res.status(400).json({ error: "A campaign is already running for this event." });
+    }
+
+    const attendees = await prisma.attendee.findMany({
+      where: { eventId: Number(eventId), email: { not: null, not: "" } }
+    });
+
+    if (attendees.length === 0) {
+      return res.status(400).json({ error: "No attendees with emails found in active dataset." });
+    }
+
+    const campaign = await prisma.$transaction(async (tx) => {
+      const camp = await tx.emailCampaign.create({
+        data: {
+          name: `Campaign for Event ${eventId}`,
+          status: "RUNNING",
+          eventId: Number(eventId),
+          totalCount: attendees.length,
+          pendingCount: attendees.length,
+          batchSize: Number(batchSize),
+          delayMs: Number(delayMs),
+          providerName
+        }
+      });
+
+      const jobsData = attendees.map(a => ({
+        campaignId: camp.id,
+        attendeeId: a.id,
+        status: "PENDING"
+      }));
+
+      // Split chunks to avoid insert limits if dataset is huge, but typically it's fine for ~2000
+      await tx.emailJob.createMany({ data: jobsData });
+      return camp;
+    });
+
+    res.json({ message: "Campaign started", campaign });
+  } catch (error) {
+    console.error("Start campaign error:", error);
+    res.status(500).json({ error: "Failed to start campaign." });
+  }
+};
+
+exports.getActiveCampaign = async (req, res) => {
+  try {
+    const { eventId } = req.query;
+    const active = await prisma.emailCampaign.findFirst({
+      where: { 
+        status: { in: ["RUNNING", "PAUSED"] },
+        ...(eventId ? { eventId: Number(eventId) } : {})
+      },
+      orderBy: { createdAt: "desc" }
+    });
+    if (!active) {
+      return res.json(null);
+    }
+    res.json(active);
+  } catch (error) {
+    console.error("Get campaign error:", error);
+    res.status(500).json({ error: "Failed to fetch active campaign." });
+  }
+};
+
+exports.pauseCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const camp = await prisma.emailCampaign.update({
+      where: { id: Number(id) },
+      data: { status: "PAUSED" }
+    });
+    res.json(camp);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to pause." });
+  }
+};
+
+exports.resumeCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const camp = await prisma.emailCampaign.update({
+      where: { id: Number(id) },
+      data: { status: "RUNNING" }
+    });
+    res.json(camp);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to resume." });
+  }
+};
+
+exports.cancelCampaign = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const camp = await prisma.$transaction(async (tx) => {
+      await tx.emailJob.updateMany({
+        where: { campaignId: Number(id), status: { in: ["PENDING", "PROCESSING"] } },
+        data: { status: "CANCELLED" }
+      });
+      return tx.emailCampaign.update({
+        where: { id: Number(id) },
+        data: { status: "CANCELLED" }
+      });
+    });
+    res.json(camp);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to cancel." });
+  }
+};
+
+exports.getCampaignReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const camp = await prisma.emailCampaign.findUnique({
+      where: { id: Number(id) }
+    });
+    const failedJobs = await prisma.emailJob.findMany({
+      where: { campaignId: Number(id), status: { in: ["FAILED", "PERM_FAILED"] } },
+      include: { attendee: { select: { email: true, name: true, roll: true } } }
+    });
+    res.json({ campaign: camp, failedJobs });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch report." });
+  }
 };
 
 exports.getAllAttendees = async (req, res) => {
   try {
+    const { eventId } = req.query;
+    if (!eventId) return res.status(400).json({ error: "eventId is required" });
+
     const attendees = await prisma.attendee.findMany({
+      where: { eventId: Number(eventId) },
       orderBy: { createdAt: "desc" },
     });
 
@@ -530,5 +769,83 @@ exports.getAllAttendees = async (req, res) => {
   } catch (error) {
     console.error("Error fetching attendees:", error);
     return res.status(500).json({ error: "Failed to fetch attendees." });
+  }
+};
+
+exports.getDatasets = async (req, res) => {
+  try {
+    const { eventId } = req.query;
+    const datasets = await prisma.uploadDataset.findMany({
+      where: eventId ? { eventId: Number(eventId) } : {},
+      orderBy: { createdAt: "desc" },
+      include: {
+        uploadedBy: { select: { name: true } }
+      }
+    });
+    res.json(datasets);
+  } catch (err) {
+    console.error("Error fetching datasets:", err);
+    res.status(500).json({ error: "Failed to fetch datasets" });
+  }
+};
+
+exports.restoreDataset = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    await prisma.$transaction(async (tx) => {
+      // Deactivate all
+      await tx.uploadDataset.updateMany({
+        where: { isActive: true },
+        data: { isActive: false }
+      });
+
+      // Activate target
+      await tx.uploadDataset.update({
+        where: { id: Number(id) },
+        data: { isActive: true }
+      });
+    });
+
+    res.json({ message: "Dataset restored successfully" });
+  } catch (err) {
+    console.error("Error restoring dataset:", err);
+    res.status(500).json({ error: "Failed to restore dataset" });
+  }
+};
+
+exports.deleteDataset = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.uploadDataset.delete({
+      where: { id: Number(id) }
+    });
+    res.json({ message: "Dataset deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting dataset:", err);
+    res.status(500).json({ error: "Failed to delete dataset" });
+  }
+};
+
+exports.clearAttendees = async (req, res) => {
+  try {
+    const { eventId } = req.query;
+    if (!eventId) {
+      return res.status(400).json({ error: "eventId is required to clear attendees." });
+    }
+    
+    await prisma.attendee.deleteMany({
+      where: { eventId: Number(eventId) }
+    });
+    
+    await prisma.uploadDataset.updateMany({
+      where: { eventId: Number(eventId) },
+      data: { isActive: false }
+    });
+    
+    res.json({ message: "Attendee list cleared successfully for the event!" });
+  } catch (err) {
+    console.error("Error clearing attendees:", err);
+    res.status(500).json({ error: "Failed to clear attendees" });
   }
 };

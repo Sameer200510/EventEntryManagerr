@@ -25,6 +25,8 @@ function App() {
         setIsInitializing(false);
         return;
       }
+
+
       try {
         const { data } = await api.get("/auth/validate");
         const currentRole = localStorage.getItem("role");
